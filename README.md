@@ -1,5 +1,5 @@
 ```
-Python CodeEasy (pyce)
+Python REST CodeEasy (pyce_rest)
 
 This sample code implements a number of storage operations around volume,
 snapshot, and flexclone management.  This is based off the Perl implementation

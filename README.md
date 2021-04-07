@@ -1,4 +1,3 @@
-```
 Python REST CodeEasy (pyce_rest)
 
 This sample code implements a number of storage operations around volume,
@@ -6,6 +5,7 @@ snapshot, and flexclone management.  This is based off the Perl implementation
 of the NetApp CodeEasy framework of scripts, and has been updated to use the
 ONTAP REST API.
 
+```
 Requirements:
   1. Configure pyceRestConfig.py with your storage system related details.
   2. Python 3.5 or higher.
@@ -15,7 +15,11 @@ Requirements:
   4. ONTAP 9.6 or higher.
 
 Run "./pyce_rest.py -h" to see usage and examples.
+```
 
+Using pyce_rest.py
+
+```
 Usage: pyce_rest.py [options]
 
 Options:
@@ -67,4 +71,23 @@ Options:
     Create a new clone named "build123_clone" from volume "build", using
     snapshot "snap1", and use a junction-path of "/builds/build123_clone":
     %> pyce_rest.py -o create_clone -c build123_clone -v build123 -s snap1 -j /builds/build123_clone
+```
+
+When using a custom vserver scoped login and role, other than admin or vsadmin,
+note the following requirements.
+
+1. The custom login must use "http" as the application:
+```
+security login create -user-or-group-name {user} -application http -authentication-method {method} -role {role} -vserver {svm}
+```
+
+2. The custom role must be given access to the SVM rest web service:
+```
+vserver services web access create -vserver {svm} -name rest -role {role}
+```
+
+3. The role must have access to the "job" command directory, since the
+netapp-ontap Python module with make REST calls to poll for job completion.
+```
+security login role create -vserver {svm} -role {role} -cmddirname job -access readonly
 ```

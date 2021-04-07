@@ -13,7 +13,8 @@
 #   2. Python 3.5 or higher.
 #   3. The netapp-ontap Python package as described at:
 #      https://pypi.org/project/netapp-ontap/
-#   3. ONTAP 9.6 or higher.
+#      Note: Use module version 9.8.0 or higher, even with ONTAP 9.7!
+#   4. ONTAP 9.7 or higher.
 #
 # Run "./pyce_rest.py -h" to see usage and examples.
 #

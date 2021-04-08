@@ -20,7 +20,7 @@
 #
 ################################################################################
 
-version="1.0"
+version="2020.04.08"
 
 import sys
 import logging
@@ -28,8 +28,13 @@ from optparse import OptionParser
 import pyceRestConfig
 
 # Import the required netap_ontap modules.
-from netapp_ontap import HostConnection, NetAppRestError, config, utils
-from netapp_ontap.resources import Volume, Snapshot
+from netapp_ontap import config as NaConfig
+from netapp_ontap.host_connection import HostConnection as NaHostConnection
+from netapp_ontap.error import NetAppRestError
+from netapp_ontap.resources import Volume as NaVolume
+from netapp_ontap.resources import Snapshot as NaSnapshot
+from netapp_ontap.resources import SnapmirrorRelationship as NaSnapmirrorRelationship
+from netapp_ontap.resources import SnapmirrorTransfer as NaSnapmirrorTransfer
 
 # Uncomment these for additional ONTAP REST API debugging.
 #logging.basicConfig(level=logging.DEBUG)
@@ -46,11 +51,11 @@ def list_volumes(volume_string):
     print("---------------------------------------------------------------------------------------")
 
     # Get list of volumes and print matches as we go.    
-    kwargs = {
+    volume_args = {
         "svm.name": pyceRestConfig.ce_vserver,
     }
     try:
-        for volume in Volume.get_collection(**kwargs): 
+        for volume in NaVolume.get_collection(**volume_args):
             name = volume.to_dict()['name']
             if volume_string in name:
                 try:
@@ -75,19 +80,26 @@ def list_volumes(volume_string):
         raise
 
 
-def create_volume(name, junction_path):
-    print("Creating volume: " + name + " with junction-path " + junction_path)
+def create_volume(name, junction_path, type):
+    if type == "dp":
+        print("Creating mirror volume: " + name)
+    else: 
+        print("Creating volume: " + name + " with junction-path " + junction_path)
 
     # Build arguments for volume creation.
-    kwargs = {}
-    kwargs.update(pyceRestConfig.ce_volume_create_options)
-    kwargs["name"] = name
-    kwargs["svm"] = {}
-    kwargs["svm"]["name"] = pyceRestConfig.ce_vserver
-    kwargs["nas"]["path"] = junction_path
+    volume_dict = {}
+    volume_dict.update(pyceRestConfig.ce_volume_create_options)
+    volume_dict["name"] = name
+    volume_dict["svm"] = {}
+    volume_dict["svm"]["name"] = pyceRestConfig.ce_vserver
+    volume_dict["nas"]["path"] = junction_path
+    volume_dict["type"] = type
+    if type == "dp":
+        # Mirror destinations cannot have these attributes set.
+        del volume_dict["nas"]
 
     # Create the volume.
-    volume = Volume(**kwargs)
+    volume = NaVolume.from_dict(volume_dict)
     try:
         volume.post()
     except NetAppRestError:
@@ -100,14 +112,14 @@ def create_volume(name, junction_path):
         pyceRestConfig.ce_vol_maxfiles
     except NameError:
       pyceRestConfig.ce_vol_maxfiles = "0"
-    if int(pyceRestConfig.ce_vol_maxfiles) > 0:
+    if int(pyceRestConfig.ce_vol_maxfiles) > 0 and type != "dp":
         # First find the volume that we just created.
-        kwargs = {
+        volume_args = {
             "name": name,
-            "svm": {"name": pyceRestConfig.ce_vserver},
+            "svm.name": pyceRestConfig.ce_vserver,
         }
         try:
-            volume = Volume.find(fields="files.maximum", **kwargs)
+            volume = NaVolume.find(fields="files.maximum", **volume_args)
         except NetAppRestError:
             print("Error finding new volume to set maxfiles!")
             raise
@@ -125,12 +137,12 @@ def delete_volume(name):
     print("Deleting volume: " + name)
 
     # First find the volume to be deleted.
-    kwargs = {
+    volume_args = {
         "name": name,
         "svm.name": pyceRestConfig.ce_vserver,
     }
     try:
-        volume = Volume.find(**kwargs)
+        volume = NaVolume.find(**volume_args)
     except NetAppRestError:
         print("Error finding volume to be deleted!")
         raise
@@ -151,12 +163,12 @@ def remount_volume(name, junction_path):
     print("Re-mounting volume: " + name + " with junction of " + junction_path)
 
     # First find the volume to be remounted.
-    kwargs = {
+    volume_args = {
         "name": name,
         "svm.name": pyceRestConfig.ce_vserver,
     }
     try:
-        volume = Volume.find(fields="nas.path", **kwargs)
+        volume = NaVolume.find(fields="nas.path", **volume_args)
     except NetAppRestError:
         print("Error finding volume to be remounted!")
         raise
@@ -175,12 +187,12 @@ def list_snapshots(volume_name):
     print("Getting list of snapshots on volume: " + volume_name)
 
     # First find the volume uuid.
-    kwargs = {
+    volume_args = {
         "name": volume_name,
         "svm.name": pyceRestConfig.ce_vserver,
     }
     try:
-        volume = Volume.find(fields="uuid", **kwargs)
+        volume = NaVolume.find(fields="uuid", **volume_args)
     except NetAppRestError:
         print("Error finding volume for snapshot listing!")
         raise
@@ -195,7 +207,7 @@ def list_snapshots(volume_name):
 
     # Now get the collection of snapshots for the volume and print details.
     try:
-        for snapshot in Snapshot.get_collection(volume.uuid):
+        for snapshot in NaSnapshot.get_collection(volume.uuid):
             try:
                 snapshot.get(fields="name,create_time")
             except NetAppRestError:
@@ -215,12 +227,12 @@ def list_snapshots(volume_name):
 
 def create_snapshot(volume_name, snapshot_name):
     # First find the volume uuid.
-    kwargs = {
+    volume_args = {
         "name": volume_name,
         "svm.name": pyceRestConfig.ce_vserver,
     }
     try:
-        volume = Volume.find(fields="uuid", **kwargs)
+        volume = NaVolume.find(fields="uuid", **volume_args)
     except NetAppRestError:
         print("Error finding volume for snapshot listing!")
         raise
@@ -230,7 +242,7 @@ def create_snapshot(volume_name, snapshot_name):
     
     # Create the snapshot.
     print("Creating snapshot " + snapshot_name + " in volume " + volume_name)
-    snapshot = Snapshot(volume.uuid)
+    snapshot = NaSnapshot(volume.uuid)
     snapshot.name = snapshot_name
     try:
         snapshot.post()
@@ -242,12 +254,12 @@ def create_snapshot(volume_name, snapshot_name):
 
 def delete_snapshot(volume_name, snapshot_name):
     # First find the volume uuid.
-    kwargs = {
+    volume_args = {
         "name": volume_name,
         "svm.name": pyceRestConfig.ce_vserver,
     }
     try:
-        volume = Volume.find(fields="uuid", **kwargs)
+        volume = NaVolume.find(fields="uuid", **volume_args)
     except NetAppRestError:
         print("Error finding volume for snapshot listing!")
         raise
@@ -256,10 +268,14 @@ def delete_snapshot(volume_name, snapshot_name):
        return
 
     # Now find the snapshot and delete it.
-    kwargs = {
+    snapshot_args = {
         "name": snapshot_name,
     }
-    snapshot = Snapshot.find(volume.uuid, **kwargs)
+    try:
+        snapshot = NaSnapshot.find(volume.uuid, **snapshot_args)
+    except NetAppRestError:
+        print("Error finding snapshot!")
+        raise
     if snapshot:
         print("Deleting snapshot " + snapshot_name + " in volume " + volume_name)
         try:
@@ -281,12 +297,12 @@ def list_clones(volume_string):
     print("----------------------------------------------------------------------------------------------------")
 
     # Get list of volume clones and print matches as we go.    
-    kwargs = {
+    volume_args = {
         "svm.name": pyceRestConfig.ce_vserver,
         "clone.is_flexclone": True
     }
     try:
-        for volume in Volume.get_collection(**kwargs): 
+        for volume in NaVolume.get_collection(**volume_args): 
             name = volume.to_dict()['name']
             if volume_string in name:
                 try:
@@ -318,19 +334,23 @@ def create_clone(volume, clone, snapshot, junction_path):
           " with snapshot " + snapshot + " and junction-path " + junction_path)
 
     # Build arguments for volume clone creation.
-    kwargs = {
-        "svm": {"name": pyceRestConfig.ce_vserver},
+    volume_dict = {
+        "svm": {
+            "name": pyceRestConfig.ce_vserver
+        },
         "name": clone,
-        "nas": {"path": junction_path}, 
+        "nas": {
+            "path": junction_path
+        }, 
         "clone": {
             "is_flexclone": "true",
             "parent_snapshot": {"name": snapshot},
             "parent_volume": {"name": volume},
-        }
+        },
     }
 
     # Create the clone.
-    volume = Volume(**kwargs)
+    volume = NaVolume.from_dict(volume_dict)
     try:
         volume.post()
     except NetAppRestError:
@@ -338,6 +358,122 @@ def create_clone(volume, clone, snapshot, junction_path):
         raise
 
     print("Volume clone created succesfully.")
+
+
+def list_mirrors():
+    print("Getting list snapmirror relationships.")
+
+    # Print header
+    print("")
+    print("%-32s %-32s %-16s %-16s" % ("Source", "Destination", "State", "Status"))
+    print("------------------------------------------------------------------------------------------------")
+
+    # Get list of volumes and print matches as we go.    
+    sm_args = {
+        "destination.svm.name": pyceRestConfig.ce_vserver
+    }
+    try:
+        for mirror in NaSnapmirrorRelationship.get_collection(**sm_args):
+            try:
+                mirror.get(fields="state,transfer,source.path,destination.path")
+            except NetAppRestError:
+                print("Error retrieving mirror details.")
+                raise
+            src = dst = state = status = ""
+            mirror_dict = mirror.to_dict()
+            if "source" in mirror_dict:
+                if "path" in mirror_dict["source"]:
+                    src = mirror_dict["source"]["path"]
+            if "destination" in mirror_dict:
+                if "path" in mirror_dict["destination"]:
+                    dst = mirror_dict["destination"]["path"]
+            if "state" in mirror_dict:
+                state = mirror_dict["state"]
+            if "transfer" in mirror_dict:
+                if "state" in mirror_dict["transfer"]:
+                    status = mirror_dict["transfer"]["state"]
+            # The transfer.status is only returned for active relationships.
+            if status == "":
+                status = "idle"
+            print("%-32s %-32s %-16s %-16s" % (src, dst, state, status))
+    except NetAppRestError:
+        print("Error retrieving mirror relationship list.")
+        raise
+
+
+def create_mirror(src, dst):
+    print("Creating mirror " + dst + " of source " + src)
+
+    # Build arguments for volume creation.
+    sm_dict = {
+        "source": {
+            "path": pyceRestConfig.ce_vserver + ":" + src
+        },
+        "destination": {
+            "path": pyceRestConfig.ce_vserver + ":" + dst
+        },
+    }
+
+    # Create the snapmirror.
+    # This assumes we have already created a DP mirror destination.
+    mirror = NaSnapmirrorRelationship.from_dict(sm_dict)
+    try:
+        mirror.post()
+    except NetAppRestError:
+        print("Error creating mirror!")
+        raise
+    print("Mirror created succesfully.")
+
+
+def update_mirror(dst):
+    # First find the snapmirror relationship uuid.
+    sm_args = {
+        "destination.path": pyceRestConfig.ce_vserver + ":" + dst,
+        "destination.svm.name": pyceRestConfig.ce_vserver,
+    }
+    try:
+        mirror = NaSnapmirrorRelationship.find(fields="uuid", **sm_args)
+    except NetAppRestError:
+        print("Error finding mirror volume!")
+        raise
+
+    # If we found the relationshp, perform the update.
+    if mirror:
+        print("Updating mirror " + dst)
+        mirror_transfer = NaSnapmirrorTransfer(mirror.uuid)
+        try:
+            mirror_transfer.post()
+        except NetAppRestError:
+            print("Error updating mirror!")
+            raise
+        print("Mirror updated.")
+    else:
+        print("Mirror not found.")
+
+
+def delete_mirror(dst):
+    # First find the snapmirror relationship uuid.
+    sm_args = {
+        "destination.path": pyceRestConfig.ce_vserver + ":" + dst,
+        "destination.svm.name": pyceRestConfig.ce_vserver,
+    }
+    try:
+        mirror = NaSnapmirrorRelationship.find(fields="uuid", **sm_args)
+    except NetAppRestError:
+        print("Error finding mirror volume!")
+        raise
+
+    # If we found the relationshp, delete it.
+    if mirror:
+        print("Deleting mirror " + dst)
+        try:
+            mirror.delete()
+        except NetAppRestError:
+            print("Error deleting mirror!")
+            raise
+        print("Mirror deleted.")
+    else:
+        print("Mirror not found.")
 
 
 def help_text():
@@ -352,35 +488,51 @@ def help_text():
     delete_snapshot
     list_clones
     create_clone
+    list_mirrors
+    create_mirror
+    update_mirror
+    delete_mirror
 
   Examples
     List all volumes with the string "build" in them:
-    %> pyce.py -o list_volumes -v build
+    %> pyce_rest.py -o list_volumes -v build
 
     Create a new volume named "build123" with a junction-path of "/builds/build123":
-    %> pyce.py -o create_volume -v build123 -j /builds/build123
+    %> pyce_rest.py -o create_volume -v build123 -j /builds/build123
 
     Delete a volume or a clone named "build123":
-    %> pyce.py -o delete_volume -v build123 
+    %> pyce_rest.py -o delete_volume -v build123 
 
     Remount a volume named "build123" with a junction-path of "/builds/build_current"
-    %> pyce.py -o remount_volume -v build123 -j /builds/build_current
+    %> pyce_rest.py -o remount_volume -v build123 -j /builds/build_current
 
     List all snapshots for volume "build123":
-    %> pyce.py -o list_snapshots -v build123 
+    %> pyce_rest.py -o list_snapshots -v build123 
   
     Create a snapshot named "snap1" on volume "build123":
-    %> pyce.py -o create_snapshot -v build123 -s snap1
+    %> pyce_rest.py -o create_snapshot -v build123 -s snap1
 
     Delete a snapshot named "snap1" on volume "build123":
-    %> pyce.py -o delete_snapshot -v build123 -s snap1
+    %> pyce_rest.py -o delete_snapshot -v build123 -s snap1
 
     List all clones with the string "clone" in them:
-    %> pyce.py -o list_clones -c clone
+    %> pyce_rest.py -o list_clones -c clone
 
     Create a new clone named "build123_clone" from volume "build", using
     snapshot "snap1", and use a junction-path of "/builds/build123_clone":
-    %> pyce.py -o create_clone -c build123_clone -v build123 -s snap1 -j /builds/build123_clone
+    %> pyce_rest.py -o create_clone -c build123_clone -v build123 -s snap1 -j /builds/build123_clone
+
+    List snapmirror relationships:
+    %> pyce_rest.py -o list_mirrors
+
+    Create snapmirror relationship:
+    %> pyce_rest.py -o create_mirror -v build123 volume -m build123_mirror
+
+    Update snapmirror relationship:
+    %> pyce_rest.py -o update_mirror -m build123_mirror
+
+    Delete snapmirror relationship:
+    %> pyce_rest.py -o delete_mirror -m build123_mirror
 """
 
     return help_text
@@ -398,14 +550,16 @@ parser.add_option("-v", dest="volume", help="volume name")
 parser.add_option("-j", dest="junction", help="junction path")
 parser.add_option("-s", dest="snapshot", help="snapshot name")
 parser.add_option("-c", dest="clone", help="clone name")
+parser.add_option("-m", dest="mirror", help="snapmirror destination volume name")
 parser.add_option("-d", dest="debug", action="store_true", help="debug mode")
 (options, args) = parser.parse_args()
 
 # Check for a valid operation type.
 op = options.operation
-operations = ["list_volumes","create_volume","delete_volume","remount_volume",\
-              "list_snapshots","create_snapshot","delete_snapshot",\
-              "list_clones","create_clone"\
+operations = ["list_volumes","create_volume","delete_volume","remount_volume",
+              "list_snapshots","create_snapshot","delete_snapshot",
+              "list_clones","create_clone",
+              "list_mirrors", "create_mirror","update_mirror","delete_mirror",
              ]
 if not op:
     print("No operation type given.")
@@ -462,14 +616,31 @@ if op == "create_clone":
         print("Missing junction path for op: " + op)
         print("Use -h to see usage and examples.")
         sys.exit(2)
+if op == "create_mirror":
+    if not options.volume:
+        print("Missing volume name for op: " + op)
+        print("Use -h to see usage and examples.")
+        sys.exit(2)
+    if not options.mirror:
+        print("Missing mirror volume for op: " + op)
+        print("Use -h to see usage and examples.")
+        sys.exit(2)
+if op == "update_mirror" or op == "delete_mirror":
+    if not options.mirror:
+        print("Missing mirror volume for op: " + op)
+        print("Use -h to see usage and examples.")
+        sys.exit(2)
 
 # If we get here, everything should be OK
 
 # Setup the REST API connection to ONTAP.
 # Using verify=False to ignore that we may see self-signed SSL certificates.
-config.CONNECTION = HostConnection(
-    pyceRestConfig.ce_cluster, username=pyceRestConfig.ce_user,
-    password=pyceRestConfig.ce_passwd, verify=False,
+NaConfig.CONNECTION = NaHostConnection(
+    host = pyceRestConfig.ce_cluster,
+    username = pyceRestConfig.ce_user,
+    password = pyceRestConfig.ce_passwd,
+    verify = False,
+    poll_timeout = 120,
 )
 
 # Call the requested operation
@@ -477,7 +648,7 @@ if op == "list_volumes":
     list_volumes(options.volume)
 
 if op == "create_volume":
-    create_volume(options.volume, options.junction)
+    create_volume(options.volume, options.junction, "rw")
 
 if op == "delete_volume":
     delete_volume(options.volume)
@@ -499,3 +670,17 @@ if op == "list_clones":
 
 if op == "create_clone":
     create_clone(options.volume, options.clone, options.snapshot, options.junction)
+
+if op == "list_mirrors":
+    list_mirrors()
+
+if op == "create_mirror":
+    create_volume(options.mirror, "", "dp")
+    create_mirror(options.volume, options.mirror)
+    update_mirror(options.mirror)
+
+if op == "update_mirror":
+    update_mirror(options.mirror)
+
+if op == "delete_mirror":
+    delete_mirror(options.mirror)

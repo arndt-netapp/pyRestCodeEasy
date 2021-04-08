@@ -30,6 +30,7 @@ Options:
   -j JUNCTION   junction path
   -s SNAPSHOT   snapshot name
   -c CLONE      clone name
+  -m MIRROR     snapmirror destination volume name
   -d            debug mode
 
   The following operation types are supported:
@@ -42,6 +43,10 @@ Options:
     delete_snapshot
     list_clones
     create_clone
+    list_mirrors
+    create_mirror
+    update_mirror
+    delete_mirror
 
   Examples
     List all volumes with the string "build" in them:
@@ -71,6 +76,18 @@ Options:
     Create a new clone named "build123_clone" from volume "build", using
     snapshot "snap1", and use a junction-path of "/builds/build123_clone":
     %> pyce_rest.py -o create_clone -c build123_clone -v build123 -s snap1 -j /builds/build123_clone
+
+    List snapmirror relationships:
+    %> pyce_rest.py -o list_mirrors
+
+    Create snapmirror relationship:
+    %> pyce_rest.py -o create_mirror -v build123 volume -m build123_mirror
+
+    Update snapmirror relationship:
+    %> pyce_rest.py -o update_mirror -m build123_mirror
+
+    Delete snapmirror relationship:
+    %> pyce_rest.py -o delete_mirror -m build123_mirror
 ```
 
 When using a custom vserver scoped login and role, other than admin or vsadmin,

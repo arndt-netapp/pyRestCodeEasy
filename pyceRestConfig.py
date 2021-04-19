@@ -28,4 +28,3 @@ ce_volume_create_options['nas']['security_style']                = 'unix'
 # Options maxfiles setting
 ce_vol_maxfiles         = "75000000"
 
-#ce_volume_create_options['efficiency-policy']                    = 'auto'

@@ -111,7 +111,7 @@ def create_volume(name, junction_path, type):
     try:
         pyceRestConfig.ce_vol_maxfiles
     except NameError:
-      pyceRestConfig.ce_vol_maxfiles = "0"
+        pyceRestConfig.ce_vol_maxfiles = "0"
     if int(pyceRestConfig.ce_vol_maxfiles) > 0 and type != "dp":
         # First find the volume that we just created.
         volume_args = {
